@@ -12,7 +12,6 @@
 #include "disp/msm_disp_snapshot.h"
 #include "msm_dsc_helper.h"
 
-#include <drm/display/drm_dsc_helper.h>
 #include <drm/drm_managed.h>
 
 #define DPU_DEBUG_VIDENC(e, fmt, ...) DPU_DEBUG("enc%d intf%d " fmt, \
@@ -130,14 +129,10 @@ static void drm_mode_to_intf_timing_params(
 	if (phys_enc->hw_intf->cap->type != INTF_DP && timing->compression_en) {
 		struct drm_dsc_config *dsc =
 		       dpu_encoder_get_dsc_config(phys_enc->parent);
-		/*
-		 * TODO: replace drm_dsc_get_bpp_int with logic to handle
-		 * fractional part if there is fraction
-		 */
-		timing->width = timing->width * drm_dsc_get_bpp_int(dsc) /
-				(dsc->bits_per_component * 3);
-		timing->xres = timing->width;
 		timing->dce_bytes_per_line = msm_dsc_get_bytes_per_line(dsc);
+		timing->width = DIV_ROUND_UP(timing->dce_bytes_per_line * 8,
+					     dsc->bits_per_component * 3);
+		timing->xres = timing->width;
 	}
 }
 
