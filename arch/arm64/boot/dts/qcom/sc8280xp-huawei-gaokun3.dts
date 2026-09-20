@@ -1730,3 +1730,8 @@
 };
 
 #include "sc8280xp-huawei-gaokun3-camera.dtsi"
+
+&iris {
+	firmware-name = "qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn";
+	status = "okay";
+};
