@@ -786,8 +786,8 @@ static int gaokun_ec_probe(struct i2c_client *client)
 	ec->enable_gpio = devm_gpiod_get_optional(dev, "enable",
 						  GPIOD_OUT_HIGH);
 	if (IS_ERR(ec->enable_gpio))
-		dev_err_probe(dev, PTR_ERR(ec->enable_gpio),
-			      "Failed to get enable-gpios\n");
+		return dev_err_probe(dev, PTR_ERR(ec->enable_gpio),
+				     "Failed to get enable-gpios\n");
 
 	/* Lid switch */
 	ec->idev = devm_input_allocate_device(dev);
