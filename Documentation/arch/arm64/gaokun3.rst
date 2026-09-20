@@ -41,7 +41,16 @@ Migration decisions
   operation remains unverified.
 * Import right-0903 force-GSI patch fb123793bfdc5a58f94aaf54ae06b47c9c797b7e
   so the existing qcom,force-gsi-mode property is actually consumed.
-* Touchscreen algorithm replacement is pending. right-0903 ts/caidj0 at
+* Keep the existing Himax/hx-algo driver and import two focused fixes from
+  vahiru/gaokun-android at 823585fee8f2b820cdafd0fdc24a6bcd864e0dd8:
+  patch 0040 rebuilds SPI read commands on retry and fits the event stack
+  into one transfer; patch 0038 compares jumps with predicted positions.
+  Preserve the source author. Coordinate ranges and default tuning are
+  unchanged; jump detection remains disabled by default.
+  Host tests of the actual read and tracker functions pass after reproducing
+  both failures on the parent. The Himax object builds with W=1 without
+  warnings after correcting two inherited kernel-doc comments.
+* Broader touchscreen algorithm replacement is pending. ts/caidj0 at
   5c868c89d36992bf98e48e3c37f525716b6c74d1 predates main transport changes
   through accd3ec; it is not a drop-in newer driver. Do not mix its raw
   coordinate scale with the current EGoTouchRev-Linux implementation.
@@ -59,7 +68,8 @@ Before the first release
   Their older patches no longer apply to this baseline. Do not classify
   them as upstreamed merely because they conflict.
 * Verify distribution-specific LSM selection. The inherited defconfig
-  lists AppArmor in CONFIG_LSM; Fedora SELinux support needs validation.
+  lists AppArmor in CONFIG_LSM; Fedora images must select SELinux via lsm=.
+  Verify /sys/kernel/security/lsm and the distro policy on the device.
 * Validate boot, touch, 60/120 Hz display, audio, Wi-Fi, Bluetooth, charging,
   USB-C, suspend/resume, video decode, and kernel upgrade/rollback on hardware.
 * EL2 is separate work: the newer remoteproc asynchronous attach and q6v5
