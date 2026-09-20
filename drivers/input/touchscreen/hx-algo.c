@@ -1028,24 +1028,19 @@ void hx_track_contacts(struct hx_algo *algo,
 		if (!trk->active)
 			continue;
 
-		/* Jump detection: if the actual (non-predicted) displacement
-		 * exceeds the jump threshold, this is a finger swap, not a
-		 * slide.  Release the old slot and let the detection spawn
-		 * a new track at a *different* slot so that lift + press
-		 * both appear in the same SYN_REPORT (zero added latency).
+		/*
+		 * Compare with the predicted position, not raw displacement:
+		 * a speed limit repeatedly resets fast slides before debounce
+		 * can expire. Release a jump into a different slot so lift and
+		 * press can appear in the same SYN_REPORT.
 		 */
-		if (algo->track_jump_dist2 > 0 && trk->age >= 2) {
-			s32 dx = det[m->det_idx].x - trk->x;
-			s32 dy = det[m->det_idx].y - trk->y;
-			s64 actual_d2 = (s64)dx * dx + (s64)dy * dy;
-
-			if (actual_d2 > algo->track_jump_dist2) {
-				hx_reset_track(trk);
-				jump_released |= (1u << m->track_idx);
-				track_matched[m->track_idx] = true;
-				/* det stays unused → picked up by new-slot logic */
-				continue;
-			}
+		if (algo->track_jump_dist2 > 0 && trk->age >= 2 &&
+		    m->dist2 > algo->track_jump_dist2) {
+			hx_reset_track(trk);
+			jump_released |= (1u << m->track_idx);
+			track_matched[m->track_idx] = true;
+			/* det stays unused → picked up by new-slot logic */
+			continue;
 		}
 
 		/* Update position: smooth or direct. */
