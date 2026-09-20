@@ -148,15 +148,9 @@ static int himax_mcu_check_crc(struct himax_ts_data *ts, u32 start_addr,
  */
 static int himax_spi_read(struct himax_ts_data *ts, u8 cmd, u8 *buf, u32 len)
 {
-	int ret;
+	int ret = -EIO;
 	int retry_cnt;
 	struct spi_message msg;
-
-	memset(ts->xfer_buf, 0, HIMAX_BUS_R_HLEN + len);
-	ts->xfer_buf[0] = HIMAX_SPI_FUNCTION_READ;
-	ts->xfer_buf[1] = cmd;
-	ts->xfer_buf[2] = 0x00;
-
 	struct spi_transfer xfer = {
 		.len = HIMAX_BUS_R_HLEN + len,
 		.tx_buf = ts->xfer_buf,
@@ -168,9 +162,14 @@ static int himax_spi_read(struct himax_ts_data *ts, u8 cmd, u8 *buf, u32 len)
 	spi_message_add_tail(&xfer, &msg);
 
 	for (retry_cnt = 0; retry_cnt < HIMAX_BUS_RETRY; retry_cnt++) {
+		/* RX overwrites TX, including the command, on each attempt. */
+		memset(ts->xfer_buf, 0, HIMAX_BUS_R_HLEN + len);
+		ts->xfer_buf[0] = HIMAX_SPI_FUNCTION_READ;
+		ts->xfer_buf[1] = cmd;
+		ts->xfer_buf[2] = 0x00;
+
 		ret = spi_sync(ts->spi, &msg);
 		if (ret < 0)
-			// TODO: 确定一般会不会出现重试的情况
 			dev_err(&ts->spi->dev, "spi transfer error, %d, retry: %d", ret, retry_cnt);
 		else
 			break;
@@ -1372,7 +1371,8 @@ static int himax_spi_probe(struct spi_device *spi)
 	spi->cs_setup.value = HIMAX_SPI_CS_SETUP_TIME;
 
 	ts->spi = spi;
-	ts->spi_xfer_max_sz = HIMAX_HX83121A_FULL_STACK_SZ;
+	/* Include the header so one transfer can read the full event stack. */
+	ts->spi_xfer_max_sz = HIMAX_HX83121A_FULL_STACK_SZ + HIMAX_BUS_R_HLEN;
 	ts->xfer_buf_sz = ts->spi_xfer_max_sz;
 	ts->event_buf_sz = HIMAX_HX83121A_FULL_STACK_SZ;
 	ts->xfer_buf = devm_kzalloc(ts->dev, ts->xfer_buf_sz, GFP_KERNEL);
