@@ -421,11 +421,12 @@ static void himax_mcu_ic_reset(struct himax_ts_data *ts, bool int_off)
 }
 
 /**
- * sense_off: stop MCU
+ * himax_sense_off - stop the MCU
+ * @ts: touchscreen state
+ * @check_en: confirm if the firmware has stopped
+ *
  * 1. request FW to stop
  * 2. enter safe mode (and reset TCON for some ICs).
- *
- * @check_en: confirm if the FW is stopped
  */
 static int himax_sense_off(struct himax_ts_data *ts, bool check_en)
 {
@@ -515,11 +516,12 @@ static int hx83102j_sense_off(struct himax_ts_data *ts, bool check_en)
 }
 
 /**
+ * himax_sense_on - restart the MCU firmware
+ * @ts: touchscreen state
  * @sw_reset: true for software reset, false for hardware reset
- *     true: write IC to leave safe mode
- *     false: pin reset
  *
- * make MCU restart running the FW
+ * A software reset writes the IC to leave safe mode; a hardware reset
+ * uses the reset pin.
  */
 static int himax_sense_on(struct himax_ts_data *ts, bool sw_reset)
 {
