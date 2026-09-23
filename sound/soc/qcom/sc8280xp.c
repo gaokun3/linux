@@ -3,6 +3,7 @@
 
 #include <dt-bindings/sound/qcom,q6afe.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
@@ -38,6 +39,18 @@ static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
 		break;
 	case WSA_CODEC_DMA_RX_0:
 	case WSA_CODEC_DMA_RX_1:
+		if (of_machine_is_compatible("huawei,gaokun3")) {
+			/*
+			 * Downstream Gaokun tuning: keep digital gain at unity;
+			 * userspace selects the PA level below the +18 dB ceiling.
+			 * This is not calibrated active speaker protection.
+			 */
+			snd_soc_limit_volume(card, "WSA_RX0 Digital Volume", 84);
+			snd_soc_limit_volume(card, "WSA_RX1 Digital Volume", 84);
+			snd_soc_limit_volume(card, "SpkrLeft PA Volume", 29);
+			snd_soc_limit_volume(card, "SpkrRight PA Volume", 29);
+			break;
+		}
 		/*
 		 * Set limit of -3 dB on Digital Volume and 0 dB on PA Volume
 		 * to reduce the risk of speaker damage until we have active
