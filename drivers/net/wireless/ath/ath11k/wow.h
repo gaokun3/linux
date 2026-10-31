@@ -11,6 +11,8 @@ struct ath11k_wow {
 	u32 max_num_patterns;
 	struct completion wakeup_completed;
 	struct wiphy_wowlan_support wowlan_support;
+	/* consecutive suspends the firmware declined */
+	u32 declined;
 };
 
 struct rfc1042_hdr {
@@ -23,6 +25,7 @@ struct rfc1042_hdr {
 
 #define ATH11K_WOW_RETRY_NUM		3
 #define ATH11K_WOW_RETRY_WAIT_MS	200
+#define ATH11K_WOW_DECLINED_MAX		3
 #define ATH11K_WOW_PATTERNS		22
 
 #ifdef CONFIG_PM

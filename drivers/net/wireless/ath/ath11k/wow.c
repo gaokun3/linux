@@ -60,7 +60,8 @@ int ath11k_wow_enable(struct ath11k_base *ab)
 
 	ath11k_warn(ab, "htc suspend not complete, failing after %d tries\n", i);
 
-	return -ETIMEDOUT;
+	/* The firmware answered every time, it is just busy. */
+	return -EBUSY;
 }
 
 int ath11k_wow_wakeup(struct ath11k_base *ab)
@@ -711,10 +712,25 @@ static void ath11k_wow_resume_crashed(struct ath11k *ar)
 		ath11k_hif_irq_enable(ab);
 }
 
+/*
+ * Undo what ath11k_wow_op_suspend() sets up before ath11k_wow_enable(), for
+ * a device that stays up after all.
+ */
+static void ath11k_wow_undo_setup(struct ath11k *ar)
+{
+	ath11k_wow_nlo_cleanup(ar);
+	ath11k_wow_clear_hw_filter(ar);
+	ath11k_wow_protocol_offload(ar, false);
+	ath11k_wow_set_keepalive(ar, WMI_STA_KEEPALIVE_METHOD_NULL_FRAME,
+				 WMI_STA_KEEPALIVE_INTERVAL_DISABLE);
+	ath11k_dp_rx_pktlog_start(ar->ab);
+}
+
 int ath11k_wow_op_suspend(struct ieee80211_hw *hw,
 			  struct cfg80211_wowlan *wowlan)
 {
 	struct ath11k *ar = hw->priv;
+	bool declined = false;
 	int ret;
 
 	ret = ath11k_mac_wait_tx_complete(ar);
@@ -784,6 +800,7 @@ int ath11k_wow_op_suspend(struct ieee80211_hw *hw,
 	ret = ath11k_wow_enable(ar->ab);
 	if (ret) {
 		ath11k_warn(ar->ab, "failed to start wow: %d\n", ret);
+		declined = ret == -EBUSY;
 		goto cleanup;
 	}
 
@@ -821,6 +838,22 @@ exit:
 		ath11k_wow_suspend_crashed(ar);
 		ret = 0;
 	}
+
+	if (ret && declined && ++ar->wow.declined <= ATH11K_WOW_DECLINED_MAX) {
+		/*
+		 * Returning 1 makes cfg80211 disconnect and power the device
+		 * down for the whole sleep, which is a high price for a
+		 * firmware that is only busy for the moment. Fail this
+		 * suspend instead; the system tries again shortly.
+		 */
+		ath11k_warn(ar->ab, "firmware declined wow, failing the suspend (%u/%u)\n",
+			    ar->wow.declined, ATH11K_WOW_DECLINED_MAX);
+		ath11k_wow_undo_setup(ar);
+		mutex_unlock(&ar->conf_mutex);
+		return -EBUSY;
+	}
+	/* Suspended, failed for another reason or fell back: start over. */
+	ar->wow.declined = 0;
 
 	mutex_unlock(&ar->conf_mutex);
 	return ret ? 1 : 0;
