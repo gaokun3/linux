@@ -890,7 +890,8 @@
 		enable-gpios = <&tlmm 173 GPIO_ACTIVE_HIGH>;
 		bat-gpios = <&tlmm 41 GPIO_ACTIVE_HIGH>;
 
-		/* EC wakeup still needs device validation. */
+		/* The EC IRQ is quiesced across suspend before enabling wake events. */
+		wakeup-source;
 		pinctrl-0 = <&ec_default>;
 		pinctrl-names = "default";
 
