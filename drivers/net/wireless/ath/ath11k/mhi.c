@@ -489,6 +489,19 @@ int ath11k_mhi_resume(struct ath11k_pci *ab_pci)
 	struct ath11k_base *ab = ab_pci->ab;
 	int ret;
 
+	/*
+	 * If the firmware crashed while the system was asleep, the device
+	 * is in RDDM and won't return to M0: a forced resume would only wait
+	 * for the timeout. Hand it to crash recovery, which restarts it once
+	 * the system is up.
+	 */
+	if (mhi_get_exec_env(ab_pci->mhi_ctrl) == MHI_EE_RDDM ||
+	    mhi_get_mhi_state(ab_pci->mhi_ctrl) == MHI_STATE_SYS_ERR) {
+		ath11k_warn(ab, "firmware crashed during suspend\n");
+		ath11k_core_schedule_reset(ab);
+		return -ESHUTDOWN;
+	}
+
 	/* Do force MHI resume as some devices like QCA6390, WCN6855
 	 * are not in M3 state but they are functional. So just ignore
 	 * the MHI state while resuming.

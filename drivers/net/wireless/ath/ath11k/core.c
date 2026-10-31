@@ -1361,6 +1361,13 @@ static int ath11k_core_resume_wow(struct ath11k_base *ab)
 
 	ret = ath11k_hif_resume(ab);
 	if (ret) {
+		/*
+		 * The firmware crashed while the system was asleep. Resume
+		 * as if WoW had worked; the restart follows the resume.
+		 */
+		if (test_bit(ATH11K_FLAG_CRASH_PENDING, &ab->dev_flags))
+			return 0;
+
 		ath11k_warn(ab, "failed to resume hif during resume: %d\n", ret);
 		return ret;
 	}
