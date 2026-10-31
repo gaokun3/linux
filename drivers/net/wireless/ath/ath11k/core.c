@@ -1255,10 +1255,26 @@ int ath11k_core_suspend(struct ath11k_base *ab)
 	if (ret <= 0)
 		return ret;
 
-	if (ab->actual_pm_policy == ATH11K_PM_WOW)
-		return ath11k_core_suspend_wow(ab);
+	/*
+	 * Crash recovery frees and rebuilds the rings that the suspend below
+	 * reaps, so wait for one in flight. If one failed, the rings are gone
+	 * and there is nothing to stop. Don't complete restart_completed then
+	 * either: ath11k_core_resume() would restart the reap timer on them.
+	 */
+	mutex_lock(&ab->core_lock);
 
-	return ath11k_core_suspend_default(ab);
+	if (!ath11k_dp_rx_mon_status_allocated(ab)) {
+		ath11k_warn(ab, "rings freed by crash recovery, skipping datapath suspend\n");
+		ret = 0;
+	} else if (ab->actual_pm_policy == ATH11K_PM_WOW) {
+		ret = ath11k_core_suspend_wow(ab);
+	} else {
+		ret = ath11k_core_suspend_default(ab);
+	}
+
+	mutex_unlock(&ab->core_lock);
+
+	return ret;
 }
 EXPORT_SYMBOL(ath11k_core_suspend);
 

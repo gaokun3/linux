@@ -5777,6 +5777,34 @@ int ath11k_dp_rx_pdev_mon_detach(struct ath11k *ar)
 	return 0;
 }
 
+/*
+ * Whether the monitor status rings, which ath11k_dp_rx_pktlog_stop() reaps,
+ * are allocated. Crash recovery frees them and allocates them again, both
+ * under ab->core_lock; they stay freed if the recovery fails.
+ */
+bool ath11k_dp_rx_mon_status_allocated(struct ath11k_base *ab)
+{
+	struct dp_srng *ring;
+	struct ath11k *ar;
+	int i, j;
+
+	lockdep_assert_held(&ab->core_lock);
+
+	for (i = 0; i < ab->num_radios; i++) {
+		ar = ab->pdevs[i].ar;
+		if (!ar)
+			return false;
+
+		for (j = 0; j < ab->hw_params.num_rxdma_per_pdev; j++) {
+			ring = &ar->dp.rx_mon_status_refill_ring[j].refill_buf_ring;
+			if (!ring->vaddr_unaligned)
+				return false;
+		}
+	}
+
+	return true;
+}
+
 int ath11k_dp_rx_pktlog_start(struct ath11k_base *ab)
 {
 	/* start reap timer */

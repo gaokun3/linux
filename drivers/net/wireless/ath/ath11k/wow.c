@@ -685,6 +685,18 @@ int ath11k_wow_op_suspend(struct ieee80211_hw *hw,
 
 	mutex_lock(&ar->conf_mutex);
 
+	/*
+	 * Crash recovery frees and rebuilds the rings reaped below. Suspend
+	 * without WoW instead: mac80211 then stops the device, and
+	 * ath11k_core_suspend() waits for the recovery.
+	 */
+	if (ar->state != ATH11K_STATE_ON) {
+		ath11k_warn(ar->ab, "device state %d, suspending without wow\n",
+			    ar->state);
+		ret = -EBUSY;
+		goto exit;
+	}
+
 	ret = ath11k_dp_rx_pktlog_stop(ar->ab, true);
 	if (ret) {
 		ath11k_warn(ar->ab,
