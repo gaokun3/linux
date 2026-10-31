@@ -76,6 +76,10 @@ struct gaokun_ucsi_reg {
 	u8 reserved;
 } __packed;
 
+#define GAOKUN_UCSI_BYTES_PER_PORT	2
+#define GAOKUN_UCSI_MAX_PORTS \
+	(sizeof_field(struct gaokun_ucsi_reg, port_data) / GAOKUN_UCSI_BYTES_PER_PORT)
+
 struct gaokun_ucsi_port {
 	struct completion usb_ack;
 	spinlock_t lock; /* serializing port resource access */
@@ -217,7 +221,7 @@ static void gaokun_ucsi_port_update(struct gaokun_ucsi_port *port,
 				    const u8 *port_data)
 {
 	struct gaokun_ucsi *uec = port->ucsi;
-	int offset = port->idx * 2; /* every port has 2 Bytes data */
+	int offset = port->idx * GAOKUN_UCSI_BYTES_PER_PORT;
 	unsigned long flags;
 	u8 dcc, ddi;
 
@@ -282,10 +286,9 @@ static int gaokun_ucsi_refresh(struct gaokun_ucsi *uec)
 	if (ret)
 		return GAOKUN_UCSI_NO_PORT_UPDATE;
 
-	uec->num_ports = ureg.num_ports;
 	idx = GET_IDX(ureg.port_updt);
 
-	if (idx < 0 || idx >= ureg.num_ports)
+	if (idx < 0 || idx >= uec->num_ports)
 		return GAOKUN_UCSI_NO_PORT_UPDATE;
 
 	gaokun_ucsi_port_update(&uec->ports[idx], ureg.port_data);
@@ -413,10 +416,16 @@ static int gaokun_ucsi_ports_init(struct gaokun_ucsi *uec)
 
 	gaokun_ec_ucsi_get_reg(uec->ec, &ureg);
 	num_ports = ureg.num_ports;
+	if (num_ports > GAOKUN_UCSI_MAX_PORTS) {
+		dev_warn(dev, "EC reports %d ports, the register holds data for %zu\n",
+			 num_ports, GAOKUN_UCSI_MAX_PORTS);
+		num_ports = GAOKUN_UCSI_MAX_PORTS;
+	}
 	uec->ports = devm_kcalloc(dev, num_ports, sizeof(*uec->ports),
 				  GFP_KERNEL);
 	if (!uec->ports)
 		return -ENOMEM;
+	uec->num_ports = num_ports;
 
 	for (i = 0; i < num_ports; ++i) {
 		ucsi_port = &uec->ports[i];
