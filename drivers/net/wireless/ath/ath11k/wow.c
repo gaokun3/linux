@@ -367,7 +367,12 @@ static int ath11k_vif_wow_set_wakeups(struct ath11k_vif *arvif,
 		__set_bit(WOW_RA_MATCH_EVENT, &wow_mask);
 		break;
 	case WMI_VDEV_TYPE_STA:
-		if (wowlan->disconnect) {
+		/*
+		 * Disconnect events need a connection: without one the firmware
+		 * reports a beacon miss right away and wakes the host again,
+		 * suspend after suspend, until the firmware crashes.
+		 */
+		if (wowlan->disconnect && arvif->is_up) {
 			__set_bit(WOW_DEAUTH_RECVD_EVENT, &wow_mask);
 			__set_bit(WOW_DISASSOC_RECVD_EVENT, &wow_mask);
 			__set_bit(WOW_BMISS_EVENT, &wow_mask);
