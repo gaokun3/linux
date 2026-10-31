@@ -7,12 +7,14 @@
  */
 
 #include <linux/backlight.h>
+#include <linux/cleanup.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_graph.h>
 #include <linux/regulator/consumer.h>
+#include <linux/slab.h>
 
 #include <drm/display/drm_dsc.h>
 #include <drm/display/drm_dsc_helper.h>
@@ -582,6 +584,79 @@ static const struct drm_display_mode ppc357db1_4_modes[] = {
 	},
 };
 
+static const struct panel_desc boe_ppc357db1_4_desc;
+
+/* Userspace reads the panel's vendor from the device tree, so keep it true. */
+static int himax_set_boe_compatible(struct device_node *np)
+{
+	static const char * const compatible[] = {
+		"boe,ppc357db1-4", "himax,hx83121a",
+	};
+	int ret;
+
+	struct of_changeset *ocs __free(kfree) = kzalloc_obj(*ocs);
+	if (!ocs)
+		return -ENOMEM;
+
+	of_changeset_init(ocs);
+	ret = of_changeset_remove_property(ocs, np,
+					   of_find_property(np, "compatible", NULL));
+	if (!ret)
+		ret = of_changeset_add_prop_string_array(ocs, np, "compatible",
+							 compatible,
+							 ARRAY_SIZE(compatible));
+	if (!ret)
+		ret = of_changeset_apply(ocs);
+	if (ret) {
+		/* ocs needs to be explicitly cleaned up before being freed. */
+		of_changeset_destroy(ocs);
+		return ret;
+	}
+
+	/* ocs has to exist as long as the change is applied. */
+	void *ptr __always_unused = no_free_ptr(ocs);
+
+	return 0;
+}
+
+/*
+ * The Matebook E Go ships with either PPC357DB1-4, and two pins strapped by the
+ * board say which; its UEFI display driver reads them to pick the panel's
+ * configuration. ID0 low and ID1 high is the BOE panel, both low the CSOT one,
+ * ID0 high is neither. Its one device tree names the CSOT panel and lists the
+ * pins, so only the BOE value changes anything here.
+ */
+static const struct panel_desc *himax_detect_panel(struct device *dev,
+						   const struct panel_desc *desc)
+{
+	struct gpio_descs *ids;
+	int id0, id1, ret;
+
+	ids = gpiod_get_array_optional(dev, "panel-id", GPIOD_IN);
+	if (IS_ERR(ids))
+		return ERR_CAST(ids);
+	if (!ids)
+		return desc;
+	if (ids->ndescs != 2) {
+		gpiod_put_array(ids);
+		return desc;
+	}
+
+	id0 = gpiod_get_value_cansleep(ids->desc[0]);
+	id1 = gpiod_get_value_cansleep(ids->desc[1]);
+	gpiod_put_array(ids);
+	dev_info(dev, "panel ID pins: %d %d\n", id0, id1);
+
+	if (id0 != 0 || id1 != 1 || desc == &boe_ppc357db1_4_desc)
+		return desc;
+
+	ret = himax_set_boe_compatible(dev->of_node);
+	if (ret)
+		dev_warn(dev, "Failed to update compatible: %d\n", ret);
+
+	return &boe_ppc357db1_4_desc;
+}
+
 static int himax_probe(struct mipi_dsi_device *dsi)
 {
 	struct mipi_dsi_device_info dsi_info = {"dsi-secondary", 0, NULL};
@@ -612,6 +687,12 @@ static int himax_probe(struct mipi_dsi_device *dsi)
 	desc = of_device_get_match_data(dev);
 	if (!desc)
 		return -ENODEV;
+
+	desc = himax_detect_panel(dev, desc);
+	if (IS_ERR(desc))
+		return dev_err_probe(dev, PTR_ERR(desc),
+				     "Failed to get panel-id-gpios\n");
+
 	ctx->desc = desc;
 	ctx->dsc = *desc->dsc_cfg;
 

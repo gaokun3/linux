@@ -31,6 +31,15 @@ properties:
   reset-gpios:
     maxItems: 1
 
+  panel-id-gpios:
+    items:
+      - description: ID0 pin
+      - description: ID1 pin
+    description:
+      Pins strapped by the board to say which panel it was built with, on
+      boards sold with more than one. The compatible names the panel to use
+      when they don't say otherwise.
+
   avdd-supply:
     description: analog positive supply for IC
 
