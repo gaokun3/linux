@@ -8,7 +8,9 @@
 #include <drm/bridge/aux-bridge.h>
 #include <linux/auxiliary_bus.h>
 #include <linux/bitops.h>
+#include <linux/completion.h>
 #include <linux/container_of.h>
+#include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/of.h>
@@ -33,6 +35,9 @@
 #define GAOKUN_HPD_IRQ_MASK	BIT(5)
 
 #define GET_IDX(updt) (ffs(updt) - 1)
+
+#define GAOKUN_UCSI_CMD_TRIES		5
+#define GAOKUN_UCSI_CMD_RETRY_MS	200
 
 #define CCX_TO_ORI(ccx) (++(ccx) % 3) /* convert ccx to enum typec_orientation */
 
@@ -109,8 +114,10 @@ struct gaokun_ucsi {
 	struct notifier_block nb;
 	u16 version;
 	u8 num_ports;
+	u64 resend_cmd; /* GET_CONNECTOR_STATUS in flight, or 0 */
 	bool registered;
 	bool usb_events; /* the EC has sent a USB event */
+	bool cmd_lost; /* the EC gave up resend_cmd */
 };
 
 /* -------------------------------------------------------------------------- */
@@ -167,6 +174,66 @@ static int gaokun_ucsi_async_control(struct ucsi *ucsi, u64 command)
 	return gaokun_ec_ucsi_write(uec->ec, buf);
 }
 
+/*
+ * When the connector changes again while GET_CONNECTOR_STATUS for it is
+ * pending, the EC sometimes gives the command up: it reports the change
+ * instead of completing the command, or sets BUSY and keeps it set. It
+ * does take the next command, so send this one again; it only reads state.
+ * gaokun_ucsi_notify() ends the wait when it sees either.
+ *
+ * This relies on what the EC was seen to do. BUSY is a legal state, so a slow
+ * command looks like a dropped one at first: the CCI is read again 200 ms
+ * later, and a completion that arrived meanwhile is taken as the result. The
+ * command is then sent again without a CANCEL first: a dropped command was
+ * never seen to complete later, the resent one completed within 50 ms, and
+ * how the EC handles CANCEL was not tried. Should a dropped command complete
+ * after all, its COMMAND_COMPLETE could end the wait for the next command
+ * early, and that command would read the wrong MESSAGE_IN.
+ */
+static int gaokun_ucsi_sync_control(struct ucsi *ucsi, u64 command, u32 *cci,
+				    void *data, size_t size, void *msg_out,
+				    size_t msg_out_size)
+{
+	struct gaokun_ucsi *uec = ucsi_get_drvdata(ucsi);
+	int tries = GAOKUN_UCSI_CMD_TRIES;
+	u32 status;
+	int ret;
+
+	if (UCSI_COMMAND(command) != UCSI_GET_CONNECTOR_STATUS)
+		return ucsi_sync_control_common(ucsi, command, cci, data, size,
+						msg_out, msg_out_size);
+
+	for (;;) {
+		if (cci)
+			*cci = 0;
+		WRITE_ONCE(uec->cmd_lost, false);
+		WRITE_ONCE(uec->resend_cmd, command);
+		ret = ucsi_sync_control_common(ucsi, command, cci, data, size,
+					       msg_out, msg_out_size);
+		WRITE_ONCE(uec->resend_cmd, 0);
+		if (!READ_ONCE(uec->cmd_lost))
+			return ret;
+
+		msleep(GAOKUN_UCSI_CMD_RETRY_MS);
+
+		/* The EC may have completed the command after all */
+		ret = gaokun_ucsi_read_cci(ucsi, &status);
+		if (ret)
+			return ret;
+		if (status & UCSI_CCI_COMMAND_COMPLETE || !--tries)
+			break;
+
+		dev_dbg(uec->dev, "resending command %#llx\n", command);
+	}
+
+	/* Without COMMAND_COMPLETE, UCSI fails the command, or cancels it */
+	if (cci)
+		*cci = status;
+	if (data && status & UCSI_CCI_COMMAND_COMPLETE)
+		ret = gaokun_ucsi_read_message_in(ucsi, data, size);
+	return ret;
+}
+
 static void gaokun_ucsi_update_connector(struct ucsi_connector *con)
 {
 	struct gaokun_ucsi *uec = ucsi_get_drvdata(con->ucsi);
@@ -212,7 +279,7 @@ static const struct ucsi_operations gaokun_ucsi_ops = {
 	.read_cci = gaokun_ucsi_read_cci,
 	.poll_cci = gaokun_ucsi_read_cci,
 	.read_message_in = gaokun_ucsi_read_message_in,
-	.sync_control = ucsi_sync_control_common,
+	.sync_control = gaokun_ucsi_sync_control,
 	.async_control = gaokun_ucsi_async_control,
 	.update_connector = gaokun_ucsi_update_connector,
 	.connector_status = gaokun_ucsi_connector_status,
@@ -400,6 +467,22 @@ static void gaokun_ucsi_usb_work(struct work_struct *work)
 			break;
 }
 
+/* See gaokun_ucsi_sync_control() */
+static void gaokun_ucsi_check_lost_cmd(struct gaokun_ucsi *uec, u32 cci)
+{
+	u64 cmd = READ_ONCE(uec->resend_cmd);
+
+	if (!cmd || !test_bit(COMMAND_PENDING, &uec->ucsi->flags) ||
+	    cci & UCSI_CCI_COMMAND_COMPLETE)
+		return;
+
+	if (cci & UCSI_CCI_BUSY ||
+	    UCSI_CCI_CONNECTOR(cci) == UCSI_DEFAULT_GET_CONNECTOR_NUMBER(cmd)) {
+		WRITE_ONCE(uec->cmd_lost, true);
+		complete(&uec->ucsi->complete);
+	}
+}
+
 static int gaokun_ucsi_notify(struct notifier_block *nb,
 			      unsigned long action, void *data)
 {
@@ -419,6 +502,7 @@ static int gaokun_ucsi_notify(struct notifier_block *nb,
 		if (ret)
 			return NOTIFY_DONE;
 
+		gaokun_ucsi_check_lost_cmd(uec, cci);
 		ucsi_notify_common(uec->ucsi, cci);
 		/*
 		 * The USB event is delivered by the same EC IRQ thread that runs
