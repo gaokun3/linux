@@ -180,6 +180,7 @@ static void gaokun_ucsi_update_connector(struct ucsi_connector *con)
 static void gaokun_set_orientation(struct ucsi_connector *con,
 				   struct gaokun_ucsi_port *port)
 {
+	enum typec_orientation orientation;
 	enum gaokun_ucsi_ccx ccx;
 	unsigned long flags;
 
@@ -187,7 +188,9 @@ static void gaokun_set_orientation(struct ucsi_connector *con,
 	ccx = port->ccx;
 	spin_unlock_irqrestore(&port->lock, flags);
 
-	typec_set_orientation(con->port, CCX_TO_ORI(ccx));
+	orientation = CCX_TO_ORI(ccx);
+	if (typec_get_orientation(con->port) != orientation)
+		typec_set_orientation(con->port, orientation);
 }
 
 static void gaokun_ucsi_connector_status(struct ucsi_connector *con)
@@ -299,6 +302,7 @@ static int gaokun_ucsi_refresh(struct gaokun_ucsi *uec)
 static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
 {
 	struct gaokun_ucsi *uec = port->ucsi;
+	struct ucsi_connector *con;
 	int idx = port->idx, ret;
 
 	/*
@@ -314,14 +318,32 @@ static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
 		return;
 	}
 
+	/*
+	 * Set the orientation from this event before the mode and HPD, so that
+	 * the PHY lanes match the plug when DP starts link training. The
+	 * .connector_status() callback sets it too, but only once UCSI's
+	 * GET_CONNECTOR_STATUS completes, which can be later or time out. Not
+	 * under the connector lock: in the EC notifier thread, UCSI may hold it
+	 * while waiting for a command completion that only this thread can
+	 * deliver. That leaves a small race with the callback: both set the
+	 * orientation from port->ccx, so they only disagree if the callback
+	 * read it just before this event changed it and writes after this, in
+	 * which case the orientation stays stale until the next event on the
+	 * port.
+	 */
+	if (idx < uec->ucsi->cap.num_connectors) {
+		con = &uec->ucsi->connector[idx];
+		if (con->port)
+			gaokun_set_orientation(con, port);
+	}
+
 	ret = typec_mux_set(port->typec_mux, &port->state);
 	if (ret)
 		dev_err(uec->dev, "failed to set mux %d\n", ret);
 
 	/*
-	 * UCSI callback .connector_status() have set orientation. Report HPD
-	 * while in DP alt mode, and once more when the port leaves it (unplug
-	 * or a switch to USB), or the connector stays connected.
+	 * Report HPD while in DP alt mode, and once more when the port leaves
+	 * it (unplug or a switch to USB), or the connector stays connected.
 	 */
 	if (port->bridge) {
 		bool hpd = port->svid == USB_TYPEC_DP_SID && port->hpd_state;
