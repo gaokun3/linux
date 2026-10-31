@@ -2347,17 +2347,18 @@ static int ath11k_core_reconfigure_on_crash(struct ath11k_base *ab)
 
 	clear_bit(ATH11K_FLAG_CRASH_FLUSH, &ab->dev_flags);
 
+	/*
+	 * On failure the HAL stays as it is: the next recovery clears and
+	 * reuses it like this one did, and it is freed when the device goes
+	 * away.
+	 */
 	ret = ath11k_core_qmi_firmware_ready(ab);
 	if (ret)
-		goto err_hal_srng_deinit;
+		return ret;
 
 	clear_bit(ATH11K_FLAG_RECOVERY, &ab->dev_flags);
 
 	return 0;
-
-err_hal_srng_deinit:
-	ath11k_hal_srng_deinit(ab);
-	return ret;
 }
 
 void ath11k_core_halt(struct ath11k *ar)
