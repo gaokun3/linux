@@ -98,6 +98,7 @@ struct gaokun_ucsi_port {
 	u16 svid;
 	u8 hpd_state;
 	u8 hpd_irq;
+	bool hpd_reported; /* last HPD state sent to the DP bridge */
 };
 
 struct gaokun_ucsi {
@@ -317,12 +318,21 @@ static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
 	if (ret)
 		dev_err(uec->dev, "failed to set mux %d\n", ret);
 
-	/* UCSI callback .connector_status() have set orientation */
-	if (port->bridge && port->svid == USB_TYPEC_DP_SID)
-		drm_aux_hpd_bridge_notify(&port->bridge->dev,
-					  port->hpd_state ?
-					  connector_status_connected :
-					  connector_status_disconnected);
+	/*
+	 * UCSI callback .connector_status() have set orientation. Report HPD
+	 * while in DP alt mode, and once more when the port leaves it (unplug
+	 * or a switch to USB), or the connector stays connected.
+	 */
+	if (port->bridge) {
+		bool hpd = port->svid == USB_TYPEC_DP_SID && port->hpd_state;
+
+		if (port->svid == USB_TYPEC_DP_SID || port->hpd_reported != hpd) {
+			drm_aux_hpd_bridge_notify(&port->bridge->dev,
+						  hpd ? connector_status_connected :
+							connector_status_disconnected);
+			port->hpd_reported = hpd;
+		}
+	}
 
 	gaokun_ec_ucsi_pan_ack(uec->ec, port->idx);
 }
