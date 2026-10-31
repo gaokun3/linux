@@ -1027,10 +1027,12 @@
 		compatible = "csot,ppc357db1-4", "himax,hx83121a";
 		reg = <0>;
 
-		pinctrl-0 = <&disp_reset_n>, <&mdp_vsync_active>;
+		pinctrl-0 = <&disp_reset_n>, <&mdp_vsync_active>, <&panel_id_default>;
 		pinctrl-names = "default";
 
 		reset-gpios = <&tlmm 38 GPIO_ACTIVE_LOW>;
+		panel-id-gpios = <&tlmm 102 GPIO_ACTIVE_HIGH>,
+				 <&tlmm 91 GPIO_ACTIVE_HIGH>;
 
 		vddi-supply = <&vreg_l2b>;
 		avdd-supply = <&vreg_avdd_5p5>;
@@ -1770,6 +1772,12 @@
 		pins = "gpio135";
 		function = "gpio";
 		drive-strength = <2>;
+		bias-disable;
+	};
+
+	panel_id_default: panel-id-default-state {
+		pins = "gpio91", "gpio102";
+		function = "gpio";
 		bias-disable;
 	};
 
