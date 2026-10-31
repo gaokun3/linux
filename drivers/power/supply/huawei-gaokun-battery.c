@@ -220,20 +220,22 @@ static void gaokun_psy_update_bat_charge(struct gaokun_psy *ecbat)
 {
 	u8 charge;
 
-	gaokun_ec_psy_read_byte(ecbat->ec, EC_BAT_STATUS, &charge);
+	/* A failed read must not decode an uninitialized stack byte. */
+	if (gaokun_ec_psy_read_byte(ecbat->ec, EC_BAT_STATUS, &charge))
+		return;
 
-	switch (charge) {
-	case EC_BAT_CHARGING:
-		ecbat->charge_now = POWER_SUPPLY_STATUS_CHARGING;
-		break;
-	case EC_BAT_DISCHARGING:
+	/* _BST is a bitmask; discharge takes precedence over stale charge bits. */
+	if (charge & EC_BAT_DISCHARGING)
 		ecbat->charge_now = POWER_SUPPLY_STATUS_DISCHARGING;
-		break;
-	case EC_BAT_FULL:
+	else if (charge & EC_BAT_FULL)
 		ecbat->charge_now = POWER_SUPPLY_STATUS_FULL;
-		break;
-	default:
-		dev_warn(ecbat->dev, "unknown charge state %d\n", charge);
+	else if (charge & EC_BAT_CHARGING)
+		ecbat->charge_now = POWER_SUPPLY_STATUS_CHARGING;
+	else {
+		if (gaokun_psy_get_adp_status(ecbat))
+			return;
+		ecbat->charge_now = ecbat->online ? POWER_SUPPLY_STATUS_NOT_CHARGING :
+						 POWER_SUPPLY_STATUS_DISCHARGING;
 	}
 }
 
