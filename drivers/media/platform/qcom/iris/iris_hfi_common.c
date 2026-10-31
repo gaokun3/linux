@@ -105,12 +105,28 @@ irqreturn_t iris_hfi_isr_handler(int irq, void *data)
 		return IRQ_NONE;
 
 	mutex_lock(&core->lock);
+	if (!core->hw_powered) {
+		/*
+		 * The core was powered off while this thread waited for the lock
+		 * (every iris_vpu_power_off() caller holds core->lock). Its
+		 * registers may now be clock/power gated, and on this SoC even a
+		 * read of a gated block is a fatal external abort, so neither clear
+		 * the interrupt nor run the response handler (it can ring the
+		 * doorbell via iris_hfi_queue_cmd_write()). Keep the enable_irq()
+		 * below: it balances iris_hfi_isr()'s disable_irq_nosync(), while
+		 * iris_vpu_power_off()'s own disable keeps the line off until the
+		 * next power-on.
+		 */
+		mutex_unlock(&core->lock);
+		goto out;
+	}
 	pm_runtime_mark_last_busy(core->dev);
 	iris_vpu_clear_interrupt(core);
 	mutex_unlock(&core->lock);
 
 	core->hfi_sys_ops->sys_hfi_response_handler(core);
 
+out:
 	if (!iris_vpu_watchdog(core, core->intr_status))
 		enable_irq(irq);
 
